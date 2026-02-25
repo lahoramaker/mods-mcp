@@ -12,7 +12,7 @@ Load a PCB design, configure milling parameters, generate toolpaths for a Roland
 
 ## What it does
 
-The server launches a Mods CE instance in a Chrome browser via Playwright, serves it over HTTP, and exposes 12 MCP tools that let an LLM:
+The server serves Mods CE over HTTP and exposes MCP tools that let an LLM:
 
 - **Discover** available programs (CNC mills, laser cutters, 3D printers) and modules (172 parsed)
 - **Load** pre-built machine programs into the browser
@@ -58,11 +58,13 @@ node src/server.js
 
 This starts:
 - An HTTP server on port 8080 serving Mods CE
-- A Chrome browser window with Mods CE loaded
 - An MCP server on stdio
+
+The browser is **not** launched automatically. Use the `launch_browser` MCP tool when you need it. This avoids opening a Chrome window every time the MCP server starts (e.g. when using Claude for unrelated tasks).
 
 Options:
 - `--port 9090` — use a different HTTP port
+- `--branch fran` — start with a specific mods branch (fetches and checks out on startup)
 - `--headless` — run Chrome in headless mode
 
 ## Configuration
@@ -103,6 +105,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | Tool | Description |
 |------|-------------|
 | `get_server_status` | Server health, browser state, HTTP URL, loaded program |
+| `launch_browser` | Launch Chrome browser on demand (must be called before browser-dependent tools) |
 | `list_programs` | List available programs by category |
 | `list_modules` | List available modules by category |
 | `get_module_info` | Parse a module's inputs, outputs, and types |
@@ -114,13 +117,15 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `create_program` | Build a custom program from modules and connections |
 | `save_program` | Save the current program state to a file |
 | `export_file` | Retrieve the most recently generated output file |
+| `update_mods` | Pull latest changes from remote for the current mods branch |
+| `switch_branch` | Switch the mods submodule to a different branch (or list available branches) |
 
 ## Example: PCB Milling Workflow
 
 Here's the sequence to generate a milling toolpath from an SVG PCB design:
 
 ```
-1. get_server_status         → verify browser is connected
+1. launch_browser             → open Chrome with Mods CE
 2. load_program              → "programs/machines/Roland/SRM-20 mill/mill 2D PCB"
 3. get_program_state         → inspect modules, find on/off switches
 4. set_parameter             → toggle save file switch ON (see note below)

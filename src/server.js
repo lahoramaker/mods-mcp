@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -18,12 +19,22 @@ const MODS_DIR = join(__dirname, '..', 'mods');
 const args = process.argv.slice(2);
 let port = 8080;
 let headless = false;
+let initialBranch = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port' && args[i + 1]) {
     port = parseInt(args[i + 1], 10);
     i++;
   }
+  if (args[i] === '--branch' && args[i + 1]) {
+    initialBranch = args[i + 1];
+    i++;
+  }
   if (args[i] === '--headless') headless = true;
+}
+
+// Helper to run git commands in the mods submodule
+function gitInMods(cmd) {
+  return execSync(cmd, { cwd: MODS_DIR, encoding: 'utf-8' }).trim();
 }
 
 // MIME types for static file serving
@@ -123,6 +134,24 @@ mcpServer.tool(
       } catch { /* ignore */ }
     }
     return { content: [{ type: 'text', text: JSON.stringify(status, null, 2) }] };
+  }
+);
+
+// --- Tool: launch_browser ---
+mcpServer.tool(
+  'launch_browser',
+  'Launch the Chromium browser to interact with Mods CE. Must be called before using tools that require the browser.',
+  {},
+  async () => {
+    if (browser.isLaunched()) {
+      return { content: [{ type: 'text', text: 'Browser is already running.' }] };
+    }
+    try {
+      await browser.launch(port, headless);
+      return { content: [{ type: 'text', text: `Browser launched (${headless ? 'headless' : 'headed'}) at http://localhost:${port}/` }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Browser launch failed: ${err.message}. Run "npx playwright install chromium" to install browsers.` }], isError: true };
+    }
   }
 );
 
@@ -384,21 +413,95 @@ mcpServer.tool(
   }
 );
 
+// --- Tool: update_mods ---
+mcpServer.tool(
+  'update_mods',
+  'Pull the latest changes from the remote mods repository for the current branch',
+  {},
+  async () => {
+    try {
+      const branch = gitInMods('git rev-parse --abbrev-ref HEAD');
+      gitInMods('git fetch origin');
+      const pull = gitInMods(`git pull origin ${branch}`);
+      const commit = gitInMods('git log --oneline -1');
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ branch, updated: true, result: pull, head: commit }, null, 2)
+        }]
+      };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error updating mods: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// --- Tool: switch_branch ---
+mcpServer.tool(
+  'switch_branch',
+  'Switch the mods submodule to a different branch and pull latest changes',
+  {
+    branch: z.string().describe('Branch name to switch to (e.g., "master", "fran")'),
+    list: z.boolean().optional().describe('If true, list available branches instead of switching')
+  },
+  async ({ branch, list }) => {
+    try {
+      if (list) {
+        gitInMods('git fetch origin');
+        const branches = gitInMods('git branch -r')
+          .split('\n')
+          .map(b => b.trim().replace('origin/', ''))
+          .filter(b => b && !b.startsWith('HEAD'));
+        const current = gitInMods('git rev-parse --abbrev-ref HEAD');
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ current, available: branches }, null, 2)
+          }]
+        };
+      }
+      gitInMods('git fetch origin');
+      gitInMods(`git checkout ${branch}`);
+      gitInMods(`git pull origin ${branch}`);
+      const commit = gitInMods('git log --oneline -1');
+      // Reload browser to pick up new code
+      if (browser.isLaunched()) {
+        const page = browser.getPage();
+        if (page) await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
+      }
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ switched: true, branch, head: commit }, null, 2)
+        }]
+      };
+    } catch (err) {
+      return { content: [{ type: 'text', text: `Error switching branch: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 // --- Startup ---
 async function start() {
+  // Switch to initial branch if specified
+  if (initialBranch) {
+    try {
+      gitInMods('git fetch origin');
+      gitInMods(`git checkout ${initialBranch}`);
+      gitInMods(`git pull origin ${initialBranch}`);
+      console.error(`[mods-mcp-v2] Switched mods to branch: ${initialBranch}`);
+    } catch (err) {
+      console.error(`[mods-mcp-v2] Failed to switch branch: ${err.message}`);
+    }
+  }
+
   // Start HTTP server
   httpServer.listen(port, () => {
     console.error(`[mods-mcp-v2] HTTP server serving Mods CE at http://localhost:${port}/`);
   });
 
-  // Launch browser
-  try {
-    await browser.launch(port, headless);
-    console.error(`[mods-mcp-v2] Browser launched (${headless ? 'headless' : 'headed'})`);
-  } catch (err) {
-    console.error(`[mods-mcp-v2] Browser launch failed: ${err.message}`);
-    console.error('[mods-mcp-v2] Run "npx playwright install chromium" to install browsers');
-  }
+  // Browser is launched on demand via the launch_browser tool
+  console.error(`[mods-mcp-v2] Browser will launch on demand (use launch_browser tool)`);
 
   // Start MCP server on stdio
   const transport = new StdioServerTransport();

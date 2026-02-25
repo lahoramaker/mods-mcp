@@ -74,6 +74,7 @@ This pattern applies to programs under `programs/machines/` including Roland SRM
 | Tool | Description |
 |------|-------------|
 | `get_server_status` | Server health, browser state, HTTP URL, loaded program info |
+| `launch_browser` | Launch Chrome on demand (must call before browser-dependent tools) |
 | `list_programs` | List available pre-built programs from `mods/programs/` by category |
 | `list_modules` | List available modules from `mods/modules/` by category |
 | `get_module_info` | Parse a module file to extract name, inputs, outputs with types |
