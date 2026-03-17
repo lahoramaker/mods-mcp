@@ -1,13 +1,16 @@
 // modules.js — Module introspection and IIFE I/O type extraction
 
 import { readdir, readFile } from 'node:fs/promises';
-import { join, relative, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, relative } from 'node:path';
 import vm from 'node:vm';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MODS_DIR = join(__dirname, '..', 'mods');
-const MODULES_DIR = join(MODS_DIR, 'modules');
+let MODS_DIR;
+let MODULES_DIR;
+
+export function init(modsDir) {
+  MODS_DIR = modsDir;
+  MODULES_DIR = join(modsDir, 'modules');
+}
 
 async function scanModules(dir, base) {
   const entries = await readdir(dir, { withFileTypes: true });
