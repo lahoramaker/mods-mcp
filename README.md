@@ -1,4 +1,4 @@
-# Mods MCP Server
+# MOPS — Machines Obeying Prompt Suggestions
 
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that bridges LLMs to [Mods CE](https://gitlab.fabcloud.org/pub/project/mods), the browser-based visual programming environment for digital fabrication.
 
@@ -12,13 +12,13 @@ Load a PCB design, configure milling parameters, generate toolpaths for a Roland
 
 ## What it does
 
-The server launches a Mods CE instance in a Chrome browser via Playwright, serves it over HTTP, and exposes 12 MCP tools that let an LLM:
+The server connects to a remote [Mods CE deployment](https://modsproject.org) via a Playwright-controlled Chrome browser and exposes MCP tools that let an LLM:
 
-- **Discover** available programs (CNC mills, laser cutters, 3D printers) and modules (172 parsed)
+- **Discover** available programs (CNC mills, laser cutters, 3D printers) and modules
 - **Load** pre-built machine programs into the browser
 - **Inspect** the full program state: modules, parameters, connections, and switch states
 - **Configure** parameters like tool diameter, feed speed, cut depth, thresholds
-- **Load files** (SVG, PNG) into reader modules for processing
+- **Load files** (SVG, PNG, STL, DXF) into reader modules for processing
 - **Execute** workflows by triggering calculations and presets
 - **Export** generated toolpath files (RML, G-code, etc.)
 - **Create** custom programs by wiring modules together
@@ -38,13 +38,12 @@ Mods CE includes pre-built programs for:
 ### Prerequisites
 
 - Node.js >= 18.0.0
-- Google Chrome installed
-- Git
+- Internet connection (or a local Mods CE dev server)
 
 ### Installation
 
 ```bash
-git clone --recurse-submodules https://github.com/lahoramaker/mods-mcp.git
+git clone https://github.com/lahoramaker/mods-mcp.git
 cd mods-mcp
 npm install
 npx playwright install chrome
@@ -57,12 +56,11 @@ node src/server.js
 ```
 
 This starts:
-- An HTTP server on port 8080 serving Mods CE
-- A Chrome browser window with Mods CE loaded
+- A Chrome browser window navigating to [modsproject.org](https://modsproject.org)
 - An MCP server on stdio
 
 Options:
-- `--port 9090` — use a different HTTP port
+- `--mods-url <url>` — connect to a different Mods CE deployment (default: `https://modsproject.org`)
 - `--headless` — run Chrome in headless mode
 
 ## Configuration
@@ -91,28 +89,32 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
   "mcpServers": {
     "mods": {
       "command": "node",
-      "args": ["/absolute/path/to/mods-mcp/src/server.js"],
-      "env": {}
+      "args": ["/absolute/path/to/mods-mcp/src/server.js"]
     }
   }
 }
 ```
 
+Optional flags via args:
+- `"--mods-url", "https://localhost:8081"` — connect to a different Mods CE deployment
+- `"--headless"` — run browser in headless mode
+
 ## MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `get_server_status` | Server health, browser state, HTTP URL, loaded program |
+| `get_server_status` | Server health, browser state, mods URL, loaded program |
+| `launch_browser` | Launch browser and navigate to the Mods CE deployment |
 | `list_programs` | List available programs by category |
 | `list_modules` | List available modules by category |
 | `get_module_info` | Parse a module's inputs, outputs, and types |
-| `load_program` | Load a program into the browser |
+| `load_program` | Load a program into the browser, optionally preload a file via src URL |
 | `get_program_state` | Read all modules, parameters, connections, and switch states |
 | `set_parameter` | Set a parameter value in a module |
 | `trigger_action` | Click a button in a module (calculate, presets, etc.) |
-| `load_file` | Load a file into a module's file input |
+| `load_file` | Load a file into a reader module (SVG/PNG via postMessage, others via file input) |
 | `create_program` | Build a custom program from modules and connections |
-| `save_program` | Save the current program state to a file |
+| `save_program` | Extract the current program state as v2 JSON |
 | `export_file` | Retrieve the most recently generated output file |
 
 ## Example: PCB Milling Workflow
@@ -142,13 +144,10 @@ To save toolpaths to a file instead of sending to a machine, use `get_program_st
 ## Architecture
 
 ```
-mods-mcp/
+mops/
 ├── src/
-│   ├── server.js      # MCP server + HTTP static file server
-│   ├── browser.js     # Playwright browser automation
-│   ├── programs.js    # Program discovery and creation
-│   └── modules.js     # Module introspection via vm sandbox
-├── mods/              # Mods CE (git submodule)
+│   ├── server.js      # MCP server, tool definitions, manifest fetching, module parsing
+│   └── browser.js     # Playwright browser automation, page interaction, file injection
 ├── .claude/
 │   └── commands/
 │       └── mods-workflow.md  # Claude Code slash command guide
@@ -157,14 +156,11 @@ mods-mcp/
 └── package.json
 ```
 
+The server fetches program and module manifests directly from the remote Mods CE deployment. No local submodule, HTTP server, or filesystem scanning required.
+
 ## Documentation
 
-See [docs/architecture.md](docs/architecture.md) for C4 architecture diagrams including:
-- **System Context** — how the MCP server fits into the LLM + Mods + machine ecosystem
-- **Container Diagram** — the three main containers inside the server process
-- **Component Diagram** — detailed view of the four source modules
-- **Sequence Diagram** — complete data flow for a PCB milling workflow
-- **Internal Pipeline** — how data flows through Mods CE modules
+See [docs/architecture.md](docs/architecture.md) for C4 architecture diagrams.
 
 ## Claude Code Integration
 
@@ -172,8 +168,8 @@ This repo includes a `/mods-workflow` slash command for Claude Code that teaches
 
 ## License
 
-The Mods CE submodule is maintained by the [Mods project](https://gitlab.fabcloud.org/pub/project/mods) at MIT's Center for Bits and Atoms. See the submodule for its license terms.
+[Mods CE](https://gitlab.fabcloud.org/pub/project/mods) is maintained by MIT's Center for Bits and Atoms. See the Mods project for its license terms.
 
 ---
 
-The code in this repo was generated using Claude Code (Opus 4.6) and OpenSpec workflows.
+Built with Claude Code (Opus 4.6) and the Model Context Protocol.

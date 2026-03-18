@@ -1,7 +1,7 @@
 {
-  "name": "mods-mcp-v2",
-  "version": "0.1.0",
-  "description": "MCP server bridging LLMs to the Mods CE digital fabrication platform",
+  "name": "mops",
+  "version": "0.2.0",
+  "description": "MOPS — Machines Obeying Prompt Suggestions. MCP server bridging LLMs to the Mods CE digital fabrication platform.",
   "type": "module",
   "main": "src/server.js",
   "engines": {
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "setup": "git submodule update --init && npx playwright install"
+    "setup": "npx playwright install"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

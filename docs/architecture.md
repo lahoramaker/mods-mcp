@@ -1,6 +1,6 @@
 # Architecture
 
-C4 model documentation for the Mods MCP Server.
+C4 model documentation for MOPS (Machines Obeying Prompt Suggestions).
 
 ## Level 1: System Context
 
@@ -8,12 +8,12 @@ Shows how the MCP server fits into the broader ecosystem — who uses it and wha
 
 ```mermaid
 C4Context
-    title System Context — Mods MCP Server
+    title System Context — MOPS
 
     Person(user, "User", "Operator, designer, or<br>Fab Lab user")
     System(llm_client, "LLM Client", "Claude Code, Claude Desktop,<br>or any MCP-compatible client")
-    System(mcp_server, "Mods MCP Server", "Bridges LLMs to the Mods CE<br>digital fabrication platform<br>via browser automation")
-    System_Ext(mods_ce, "Mods CE", "Browser-based visual programming<br>environment for digital fabrication")
+    System(mcp_server, "MOPS", "MCP server bridging LLMs<br>to Mods CE via browser automation")
+    System_Ext(mods_ce, "Mods CE", "Remote deployment at<br>modsproject.org")
     System_Ext(machine, "Fabrication Machine", "Roland SRM-20, Epilog laser,<br>Prusa 3D printer, etc.")
 
     Rel(user, llm_client, "Natural language<br>instructions")
@@ -24,45 +24,46 @@ C4Context
 
 ## Level 2: Container Diagram
 
-The MCP server process contains three main containers: the MCP protocol handler, an HTTP server, and a managed browser instance.
+The MCP server process contains two main containers: the MCP protocol handler and a managed browser instance. Modules and programs are fetched from the remote Mods CE deployment.
 
 ```mermaid
 C4Container
-    title Container Diagram — Mods MCP Server
+    title Container Diagram — MOPS
 
     Person(llm, "LLM Client")
 
-    System_Boundary(server_process, "MCP Server Process (Node.js)") {
-        Container(mcp, "MCP Server", "McpServer + StdioTransport", "Registers 12 tools,<br>validates input with Zod,<br>routes to handlers")
-        Container(http, "HTTP Server", "Node.js http.createServer", "Serves Mods CE static files<br>from mods/ submodule<br>on port 8080")
+    System_Boundary(server_process, "MOPS (Node.js)") {
+        Container(mcp, "MCP Server", "McpServer + StdioTransport", "Registers 13 tools,<br>validates input with Zod,<br>fetches remote manifests")
         Container(browser_mgr, "Browser Manager", "Playwright", "Launches Chrome,<br>manages page lifecycle,<br>intercepts downloads")
-        ContainerDb(fs, "File System", "mods/ submodule", "Programs (53 JSON),<br>Modules (172 IIFE .js),<br>Static assets")
+        Container(vm, "Module Parser", "Node.js vm sandbox", "Evaluates module IIFEs<br>to extract I/O definitions")
     }
 
+    System_Ext(mods_remote, "Mods CE (Remote)", "modsproject.org<br>Programs, modules, static assets")
     System_Ext(chrome, "Chrome Browser", "Runs Mods CE application")
 
     Rel(llm, mcp, "stdio JSON-RPC", "MCP protocol")
     Rel(mcp, browser_mgr, "load, interact, read state")
-    Rel(mcp, fs, "list, read, parse modules")
+    Rel(mcp, vm, "parse module source")
+    Rel(mcp, mods_remote, "HTTP fetch", "manifests, module source")
     Rel(browser_mgr, chrome, "CDP (Chrome DevTools Protocol)")
-    Rel(chrome, http, "HTTP GET", "Load Mods CE + programs")
-    Rel(http, fs, "Read static files")
+    Rel(chrome, mods_remote, "HTTP GET", "Load Mods CE + programs")
 ```
 
 ## Level 3: Component Diagram
 
-Detailed view of the four source modules and how they collaborate.
+Detailed view of the two source modules and how they collaborate.
 
 ```mermaid
 C4Component
     title Component Diagram — Source Modules
 
     Container_Boundary(server_js, "server.js — Entry Point") {
-        Component(cli, "CLI Parser", "Parses --port and --headless flags")
-        Component(http_server, "HTTP Static Server", "Serves mods/ directory with MIME types")
-        Component(mcp_server, "MCP Tool Registry", "12 tools with Zod schemas")
+        Component(cli, "CLI Parser", "Parses --mods-url and --headless flags")
+        Component(manifest, "Manifest Cache", "Fetches and caches<br>modules/programs index.json")
+        Component(mcp_server, "MCP Tool Registry", "13 tools with Zod schemas")
         Component(find_module, "findModule()", "Resolves module by name or name:id")
-        Component(startup, "start()", "Orchestrates HTTP → Browser → MCP")
+        Component(vm_sandbox, "extractWithVm()", "VM sandbox with DOM mocks<br>for module IIFE parsing")
+        Component(regex_fb, "extractWithRegex()", "Regex fallback parser")
     }
 
     Container_Boundary(browser_js, "browser.js — Browser Automation") {
@@ -70,42 +71,27 @@ C4Component
         Component(load_prog, "loadProgram()", "Navigates to ?program= URL,<br>waits for DOM modules")
         Component(get_state, "getProgramState()", "Reads DOM modules + SVG links,<br>builds connection map")
         Component(set_input, "setModuleInput()", "Sets text/checkbox values,<br>dispatches change events")
-        Component(click_btn, "clickModuleButton()", "Finds button by text,<br>clicks it")
-        Component(set_file, "setModuleFile()", "Injects file via Playwright<br>setInputFiles()")
-        Component(downloads, "Download Interceptor", "Captures Playwright download<br>events in memory")
-        Component(extract, "extractProgramState()", "Replicates mods.js save_program()<br>reads #modules + #svg #links")
-    }
-
-    Container_Boundary(programs_js, "programs.js — Program Discovery") {
-        Component(list_prog, "listPrograms()", "Recursive scan of<br>mods/programs/")
-        Component(create_prog, "createProgram()", "Builds program JSON from<br>module paths + link specs")
-        Component(save_prog, "saveProgram()", "Writes program JSON to<br>programs/custom/")
-    }
-
-    Container_Boundary(modules_js, "modules.js — Module Introspection") {
-        Component(list_mod, "listModules()", "Recursive scan of<br>mods/modules/")
-        Component(get_info, "getModuleInfo()", "Parses IIFE to extract<br>name, inputs, outputs")
-        Component(vm_sandbox, "extractWithVm()", "Node.js vm sandbox with<br>DOM mocks (172/172 success)")
-        Component(regex_fb, "extractWithRegex()", "Regex fallback for<br>var name/inputs/outputs")
+        Component(click_btn, "clickModuleButton()", "Finds button by text, clicks it")
+        Component(post_msg, "postMessageFile()", "Injects SVG/PNG via postMessage API")
+        Component(set_file, "setModuleFile()", "Injects files via setInputFiles()")
+        Component(downloads, "Download Interceptor", "Captures Playwright download events")
+        Component(extract, "extractProgramState()", "Calls mods_build_v2_program()<br>or fallback DOM extraction")
     }
 
     Rel(mcp_server, find_module, "resolves modules")
     Rel(find_module, get_state, "gets current state")
+    Rel(mcp_server, manifest, "fetches manifests")
     Rel(mcp_server, launch, "start browser")
     Rel(mcp_server, load_prog, "load program")
     Rel(mcp_server, get_state, "read state")
     Rel(mcp_server, set_input, "set parameters")
     Rel(mcp_server, click_btn, "trigger actions")
-    Rel(mcp_server, set_file, "load files")
+    Rel(mcp_server, post_msg, "load SVG/PNG")
+    Rel(mcp_server, set_file, "load other files")
     Rel(mcp_server, downloads, "export files")
     Rel(mcp_server, extract, "save program")
-    Rel(mcp_server, list_prog, "list programs")
-    Rel(mcp_server, create_prog, "create programs")
-    Rel(mcp_server, save_prog, "save programs")
-    Rel(mcp_server, list_mod, "list modules")
-    Rel(mcp_server, get_info, "get module info")
-    Rel(get_info, vm_sandbox, "primary parser")
-    Rel(get_info, regex_fb, "fallback parser")
+    Rel(mcp_server, vm_sandbox, "parse modules")
+    Rel(vm_sandbox, regex_fb, "fallback")
 ```
 
 ## Sequence Diagram: PCB Milling Workflow
@@ -115,37 +101,30 @@ Shows the complete data flow when an LLM generates a PCB toolpath.
 ```mermaid
 sequenceDiagram
     participant LLM as LLM Client
-    participant MCP as MCP Server
+    participant MCP as MOPS
     participant PW as Playwright
     participant Chrome as Chrome Browser
     participant Mods as Mods CE (DOM)
-    participant HTTP as HTTP Server
-    participant FS as File System
+    participant Remote as modsproject.org
 
-    Note over LLM, FS: 1. Startup
-    MCP->>HTTP: Listen on port 8080
-    MCP->>FS: Serve mods/ directory
+    Note over LLM, Remote: 1. Startup
     MCP->>PW: Launch Chrome
     PW->>Chrome: Open browser
-    Chrome->>HTTP: GET /index.html
-    HTTP->>FS: Read mods/index.html
-    FS-->>HTTP: HTML + JS + CSS
-    HTTP-->>Chrome: Mods CE application
+    Chrome->>Remote: GET modsproject.org
+    Remote-->>Chrome: Mods CE application
     Chrome->>Mods: Initialize mods.js
 
-    Note over LLM, FS: 2. Load Program
+    Note over LLM, Remote: 2. Load Program
     LLM->>MCP: load_program("...SRM-20 mill/mill 2D PCB")
     MCP->>PW: loadProgram()
     PW->>Chrome: Navigate to ?program=...
-    Chrome->>HTTP: GET program JSON
-    HTTP->>FS: Read program file
-    FS-->>HTTP: JSON with module definitions
-    HTTP-->>Chrome: Program JSON
+    Chrome->>Remote: GET program JSON + module sources
+    Remote-->>Chrome: Program data
     Chrome->>Mods: eval() module IIFEs, build UI
     PW-->>MCP: DOM modules ready
     MCP-->>LLM: Module list + IDs
 
-    Note over LLM, FS: 3. Inspect & Configure
+    Note over LLM, Remote: 3. Inspect & Configure
     LLM->>MCP: get_program_state()
     MCP->>PW: getProgramState()
     PW->>Chrome: page.evaluate()
@@ -166,12 +145,11 @@ sequenceDiagram
     Chrome->>Mods: Apply preset parameters
     MCP-->>LLM: Clicked
 
-    Note over LLM, FS: 4. Load Input & Calculate
+    Note over LLM, Remote: 4. Load Input & Calculate
     LLM->>MCP: load_file("read SVG", "/path/to/board.svg")
-    MCP->>PW: setModuleFile()
-    PW->>Chrome: setInputFiles(board.svg)
-    Chrome->>Mods: FileReader → svg_load_handler → outputs.SVG.event()
-    Mods->>Mods: SVG → convert → threshold → distance → offset → edge → vectorize
+    MCP->>PW: postMessageFile()
+    PW->>Chrome: window.postMessage(SVG data)
+    Chrome->>Mods: SVG → convert → threshold → distance → offset → edge → vectorize
 
     LLM->>MCP: trigger_action("mill raster 2D", "calculate")
     MCP->>PW: clickModuleButton()
@@ -182,10 +160,10 @@ sequenceDiagram
     PW->>PW: Capture download in memory
     MCP-->>LLM: Success + download info
 
-    Note over LLM, FS: 5. Export
+    Note over LLM, Remote: 5. Export
     LLM->>MCP: export_file()
     MCP->>PW: getLatestDownload()
-    PW-->>MCP: RML file content (69KB)
+    PW-->>MCP: RML file content
     MCP-->>LLM: Toolpath data
 ```
 
@@ -253,17 +231,17 @@ flowchart LR
 Mods CE was designed as a standalone browser application. Its core runtime (`mods.js`) uses closures, `eval()`, and direct DOM manipulation that make it impossible to run in Node.js. Playwright lets us control the real application exactly as a human would, while also providing:
 
 - **Download interception** for capturing generated toolpath files
-- **File input injection** via `setInputFiles()` for loading SVG/PNG designs
+- **File injection** via `setInputFiles()` and `postMessage` for loading designs
 - **JavaScript evaluation** for reading DOM state and triggering events
 - **Page navigation** for loading different programs
 
+### Why a remote deployment instead of a local submodule?
+
+The original architecture bundled Mods CE as a git submodule served via a local HTTP server. The remote-only approach eliminates the submodule dependency, simplifies installation, and means MOPS always uses the latest Mods CE version deployed at [modsproject.org](https://modsproject.org). A custom deployment URL can still be specified via `--mods-url`.
+
 ### Why a vm sandbox for module parsing?
 
-Module IIFE source files define their inputs/outputs inside closures. Simple regex extraction misses complex cases (computed types, conditional ports). The Node.js `vm` module lets us evaluate each IIFE in an isolated sandbox with minimal DOM mocks, achieving 100% parse rate (172/172 modules) without executing any browser-dependent code.
-
-### Why double-stringified links?
-
-This is a Mods CE design choice, not ours. Program JSON stores connections as an array of JSON strings, where each string parses to an object whose `source` and `dest` fields are themselves JSON strings. Three levels of parsing are needed. Our `extractProgramState()` and `createProgram()` functions handle this encoding transparently.
+Module IIFE source files define their inputs/outputs inside closures. Simple regex extraction misses complex cases (computed types, conditional ports). The Node.js `vm` module lets us evaluate each IIFE in an isolated sandbox with minimal DOM mocks, achieving 100% parse rate without executing any browser-dependent code.
 
 ### Why connection topology in get_program_state?
 
